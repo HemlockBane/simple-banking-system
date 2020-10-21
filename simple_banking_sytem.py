@@ -11,6 +11,7 @@ class SimpleBankingSystem:
         self.db_v2 = Db()
 
     def generate_control_sum(self, card_number_str, should_validate=False):
+        '''Generate control sum using Luhn algorithm'''
         if should_validate:
             card_number_str = card_number_str[:-1]
 
@@ -28,6 +29,7 @@ class SimpleBankingSystem:
         return sum(int_list)
 
     def generate_check_sum(self, ctrl_sum: int):
+        '''Generate a checksum to complete the control sum using Luhn algorithm'''
         if ctrl_sum % 10 != 0:
             last_digit_str = str(ctrl_sum)[-1]
             checksum = 10 - int(last_digit_str)
