@@ -1,62 +1,17 @@
+from card_db import Db
 import random as r
 import sys
-import string
-import sqlite3 as sq3
 
-
-class Db:
-
-    def __init__(self):
-        self.connection = self.init_db()
-
-    def init_db(self):
-        create_table_query = '''create table if not exists test (
-                            id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                            number TEXT, pin TEXT, 
-                            balance INTEGER DEFAULT 0
-                        );'''
-
-        db_connection = sq3.connect("test.s3db")
-        db_cursor = db_connection.cursor()
-        db_cursor.execute(create_table_query)
-
-        return db_connection
-
-    def save_card_details(self, card_num, pin):
-        insert_value_query = ''' insert into test (number, pin)
-                            values (?,?);'''
-        db_cursor = self.connection.cursor()
-        db_cursor.execute(insert_value_query, [card_num, pin])
-        self.connection.commit()
-        return int(db_cursor.lastrowid)
-
-    def get_card_details(self, card_num, pin):
-        select_user_query = '''select id from test
-                               where number = ? and pin = ?;'''
-        db_cursor = self.connection.cursor()
-        db_cursor.execute(select_user_query, [card_num, pin])
-        rows = db_cursor.fetchall()
-        return rows
-
-    def get_account_balance(self, card_id):
-        select_user_balance_query = '''select balance from test
-                                       where id = ?;'''
-        db_cursor = self.connection.cursor()
-        db_cursor.execute(select_user_balance_query, [card_id])
-        rows = db_cursor.fetchall()
-        return rows[0] if len(rows) != 0 else ()
-
-    def close(self):
-        self.connection.close()
 
 
 class SimpleBankingSystem:
     def __init__(self):
         self.card_id = 0
+        self.card_number = ""
         self.db_v2 = Db()
 
-    def generate_control_sum(self, card_number_str, is_validate=False):
-        if is_validate:
+    def generate_control_sum(self, card_number_str, should_validate=False):
+        if should_validate:
             card_number_str = card_number_str[:-1]
 
         int_map = map(int, list(card_number_str))
@@ -81,6 +36,15 @@ class SimpleBankingSystem:
 
         return checksum
 
+    def validate_card_number(self, card_num):
+        ctrl_sum = self.generate_control_sum(card_num, should_validate=True)
+        result = ctrl_sum + int(card_num[-1])
+
+        if result % 10 == 0:
+            return True
+        else:
+            return False
+
     def create_account(self):
         issuer_id_num = "400000"
         r.seed()
@@ -96,9 +60,8 @@ class SimpleBankingSystem:
         pin = ""
         for i in range(4):
             pin = pin + str(r.randint(0, 9))
-        # self.db.append((card_num, pin))
-        card_id = self.db_v2.save_card_details(card_num, pin)
-        # print("card db id", card_id)
+
+        self.db_v2.save_card_details(card_num, pin)
 
         print("Your card has been created",
               "Your card number:", card_num, sep="\n")
@@ -109,27 +72,82 @@ class SimpleBankingSystem:
         pin_code = input("Enter your PIN:\n")
         rows = self.db_v2.get_card_details(card_number, pin_code)
 
-        if len(rows) != 0:
-            self.card_id = rows[0][0]
-            # print(self.card_id)
-            print("You have successfully logged in!")
-        else:
+        if len(rows) == 0:
             print("Wrong card number or PIN!")
+        else:
+            self.card_id = rows[0][0]
+            self.card_number = card_number
+            print("You have successfully logged in!")
+            # self.db_v2.get_all_card_details()
 
-        while True:
-            print("1. Balance", "2. Log out", "0. Exit", sep="\n")
-            user_input = int(input())
-            if user_input == 0:
-                self.db_v2.close()
-                print("Bye!")
-                sys.exit()
+            while True:
+                print("1. Balance", "2. Add income", "3. Do transfer",
+                      "4. Close account", "5. Log out", "0. Exit", sep="\n")
+                user_input = int(input())
+                if user_input == 0:
+                    self.db_v2.close()
+                    print("Bye!")
+                    sys.exit()
 
-            elif user_input == 1:
-                result = self.db_v2.get_account_balance(self.card_id)
-                print(f"Balance: {result[0]}")
-            elif user_input == 2:
-                print("You have successfully logged out!")
-                break
+                elif user_input == 1:
+                    result = self.db_v2.get_account_balance(self.card_id)
+                    print(f"Balance: {result[0]}")
+
+                elif user_input == 2:
+                    amount = int(input("Enter income:\n"))
+                    self.add_income(amount)
+                    print('Income was added!')
+
+                elif user_input == 3:
+                    self.transfer_money()
+
+                elif user_input == 4:
+                    self.close_account()
+                    print("The account has been closed!")
+                    break
+
+                elif user_input == 5:
+                    print("You have successfully logged out!")
+                    break
+
+    def add_income(self, amount):
+        self.db_v2.increase_account_balance(amount, self.card_id)
+
+    def transfer_money(self):
+        print("Transfer")
+        card_num = input("Enter card number:\n")
+
+        is_valid = self.validate_card_number(card_num)
+        if not is_valid:
+            print("Probably you made a mistake in the card number. Please try again!")
+            return
+
+        if card_num == self.card_number:
+            print("You can't transfer money to the same account!")
+            return
+
+        rows = self.db_v2.check_if_card_exists(card_num)
+        if len(rows) == 0:
+            print("Such a card does not exist.")
+            return
+
+        transfer_amount = int(
+            input("Enter how much money you want to transfer:\n"))
+        res = self.db_v2.get_account_balance(self.card_id)
+        acct_balance = res[0]
+
+        if acct_balance < transfer_amount:
+            print("Not enough money!")
+            return
+
+        self.db_v2.decrease_account_balance(transfer_amount, self.card_id)
+
+        dest_card_id = rows[0][0]
+        self.db_v2.increase_account_balance(transfer_amount, dest_card_id)
+        print("Success!")
+
+    def close_account(self):
+        self.db_v2.delete_card_details(self.card_id)
 
     def run(self):
         while True:
